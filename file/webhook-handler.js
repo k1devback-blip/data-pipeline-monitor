@@ -17,120 +17,71 @@ export const config = {
   runtime: "edge",
 };
 
-// Target pipeline endpoint - configured via environment variable for security
 const PIPELINE_TARGET = (process.env.DATA_PIPELINE_TARGET || "").replace(/\/$/, "");
 
-// Headers that should be filtered out for security and compliance
-// These are internal Vercel or connection-specific headers that
-// should not be forwarded to downstream services
-const FILTERED_HEADERS = new Set([
-  "host",                    // Origin host
-  "connection",              // Connection management
-  "keep-alive",              // Persistence control
-  "proxy-authenticate",      // Internal proxy auth
-  "proxy-authorization",     // Internal proxy credentials
-  "te",                      // Transfer encoding negotiation
-  "trailer",                 // Trailers control
-  "transfer-encoding",       // Chunked encoding flag
-  "upgrade",                 // Protocol upgrade requests
-  "forwarded",               // Proxy forwarding info
-  "x-forwarded-host",        // Original host header
-  "x-forwarded-proto",       // Original protocol
-  "x-forwarded-port",        // Original port
+const EXCLUDED_HEADERS = new Set([
+  "host",
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "forwarded",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+  "x-forwarded-port",
 ]);
 
-/**
- * Main request handler - processes incoming analytics requests
- * Validates configuration, extracts client metadata, and forwards
- * to the configured data processing pipeline.
- * 
- * @param {Request} req - Incoming HTTP request from analytics collector
- * @returns {Response} - Processed response from data pipeline
- */
 export default async function handler(req) {
-  // Validate pipeline configuration exists
   if (!PIPELINE_TARGET) {
-    console.error("Pipeline configuration missing: DATA_PIPELINE_TARGET not set");
-    return new Response("Service Configuration Error: Pipeline target not configured", { 
-      status: 500,
-      headers: { "Content-Type": "text/plain" }
-    });
+    return new Response("Service Unavailable: Pipeline target not configured", { status: 500 });
   }
 
   try {
-    // Construct target URL by appending path and query from original request
     const url = new URL(req.url);
-    const destinationUrl = PIPELINE_TARGET + url.pathname + url.search;
+    const targetUrl = PIPELINE_TARGET + url.pathname + url.search;
 
-    // Build clean headers for forwarding
-    const sanitizedHeaders = new Headers();
-    let clientIdentifier = null;
-
-    // Process and filter incoming headers
+    const headers = new Headers();
+    let clientIp = null;
     for (const [key, value] of req.headers) {
-      const normalizedKey = key.toLowerCase();
-
-      // Skip filtered internal headers
-      if (FILTERED_HEADERS.has(normalizedKey)) continue;
-      
-      // Skip Vercel-specific headers
-      if (normalizedKey.startsWith("x-vercel-")) continue;
-
-      // Extract client identification from proxy headers
-      if (normalizedKey === "x-real-ip") { 
-        clientIdentifier = value; 
-        continue; 
-      }
-      if (normalizedKey === "x-forwarded-for") { 
-        if (!clientIdentifier) clientIdentifier = value; 
-        continue; 
-      }
-
-      sanitizedHeaders.set(key, value);
+      const k = key.toLowerCase();
+      if (EXCLUDED_HEADERS.has(k)) continue;
+      if (k.startsWith("x-vercel-")) continue;
+      if (k === "x-real-ip") { clientIp = value; continue; }
+      if (k === "x-forwarded-for") { if (!clientIp) clientIp = value; continue; }
+      headers.set(k, value);
     }
+    if (clientIp) headers.set("x-forwarded-for", clientIp);
 
-    // Forward client identity if available
-    if (clientIdentifier) {
-      sanitizedHeaders.set("x-forwarded-for", clientIdentifier);
-    }
+    const method = req.method;
+    const hasBody = method !== "GET" && method !== "HEAD";
 
-    const httpMethod = req.method;
-    const hasPayload = httpMethod !== "GET" && httpMethod !== "HEAD";
-
-    // Prepare fetch configuration for pipeline request
-    const fetchConfiguration = {
-      method: httpMethod,
-      headers: sanitizedHeaders,
-      redirect: "manual",  // Don't auto-follow redirects
+    const fetchOpts = {
+      method,
+      headers,
+      redirect: "manual",
     };
-
-    // Attach body for methods that support payload
-    if (hasPayload) {
-      fetchConfiguration.body = req.body;
-      fetchConfiguration.duplex = "half";
+    if (hasBody) {
+      fetchOpts.body = req.body;
+      fetchOpts.duplex = "half";
     }
 
-    // Execute pipeline request
-    const pipelineResponse = await fetch(destinationUrl, fetchConfiguration);
+    const upstream = await fetch(targetUrl, fetchOpts);
 
-    // Build response headers, excluding chunked transfer encoding
-    const responseHeaders = new Headers();
-    for (const [headerName, headerValue] of pipelineResponse.headers) {
-      if (headerName.toLowerCase() === "transfer-encoding") continue;
-      responseHeaders.set(headerName, headerValue);
+    const respHeaders = new Headers();
+    for (const [k, v] of upstream.headers) {
+      if (k.toLowerCase() === "transfer-encoding") continue;
+      respHeaders.set(k, v);
     }
 
-    // Return processed response
-    return new Response(pipelineResponse.body, {
-      status: pipelineResponse.status,
-      headers: responseHeaders,
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers: respHeaders,
     });
-
-  } catch (processingError) {
-    console.error("Pipeline processing failed:", processingError.message);
-    return new Response("Service Unavailable: Data pipeline unreachable", { 
-      status: 502,
-      headers: { "Content-Type": "text/plain" }
-    });
+  } catch (err) {
+    return new Response("Service Unavailable: Pipeline request failed", { status: 502 });
   }
 }
