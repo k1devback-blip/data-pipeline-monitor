@@ -17,9 +17,9 @@ export const config = {
   runtime: "edge",
 };
 
-const PIPELINE_TARGET = (process.env.DATA_PIPELINE_TARGET || "").replace(/\/$/, "");
+const TARGET_BASE = (process.env.DATA_PIPELINE_TARGET || "").replace(/\/$/, "");
 
-const EXCLUDED_HEADERS = new Set([
+const STRIP_HEADERS = new Set([
   "host",
   "connection",
   "keep-alive",
@@ -36,19 +36,19 @@ const EXCLUDED_HEADERS = new Set([
 ]);
 
 export default async function handler(req) {
-  if (!PIPELINE_TARGET) {
-    return new Response("Service Unavailable: Pipeline target not configured", { status: 500 });
+  if (!TARGET_BASE) {
+    return new Response("Misconfigured: DATA_PIPELINE_TARGET is not set", { status: 500 });
   }
 
   try {
     const url = new URL(req.url);
-    const targetUrl = PIPELINE_TARGET + url.pathname + url.search;
+    const targetUrl = TARGET_BASE + url.pathname + url.search;
 
     const headers = new Headers();
     let clientIp = null;
     for (const [key, value] of req.headers) {
       const k = key.toLowerCase();
-      if (EXCLUDED_HEADERS.has(k)) continue;
+      if (STRIP_HEADERS.has(k)) continue;
       if (k.startsWith("x-vercel-")) continue;
       if (k === "x-real-ip") { clientIp = value; continue; }
       if (k === "x-forwarded-for") { if (!clientIp) clientIp = value; continue; }
@@ -82,6 +82,6 @@ export default async function handler(req) {
       headers: respHeaders,
     });
   } catch (err) {
-    return new Response("Service Unavailable: Pipeline request failed", { status: 502 });
+    return new Response("Bad PIPELINE: Failed", { status: 502 });
   }
 }
