@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "name": "data-pipeline-monitor",
+  "rewrites": [
+    { 
+      "source": "/(.*)", 
+      "destination": "/file/webhook-handler" 
+    }
+  ],
+  "trailingSlash": false,
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Service-Name",
+          "value": "pipeline-monitor"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "data-pipeline-monitor",
+  "version": "2.1.0",
+  "description": "Edge-based analytics pipeline monitor for collecting and routing data between microservices",
+  "private": true,
+  "license": "MIT",
+  "author": "DataOps Team",
+  "keywords": [
+    "analytics",
+    "pipeline",
+    "edge-computing",
+    "data-routing",
+    "webhook-handler"
+  ]
+}
